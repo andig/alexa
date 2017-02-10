@@ -1,0 +1,4 @@
+CurrentValueIntent tell me {Channel}
+TotalConsumptionIntent tell me {Channel}
+CurrentValueIntent gib mir {Channel}
+TotalConsumptionIntent gib mir {Channel}

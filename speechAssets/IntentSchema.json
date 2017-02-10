@@ -1,0 +1,25 @@
+{
+  "intents": [
+    {
+      "intent": "CurrentValueIntent",
+      "slots": [
+        {
+          "name": "Channel",
+          "type": "LIST_OF_CHANNEL_NAMES"
+        }
+      ]
+    },
+    {
+      "intent": "TotalConsumptionIntent",
+      "slots": [
+        {
+          "name": "Channel",
+          "type": "LIST_OF_CHANNEL_NAMES"
+        }
+      ]
+    },
+    {
+      "intent": "AMAZON.HelpIntent"
+    }
+  ]
+}
