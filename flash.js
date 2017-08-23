@@ -1,12 +1,19 @@
 /*jshint esversion: 6 */
 'use strict';
 
-var middleware = 'https://volkszaehler.io/middleware.php/data/';
+var middleware = 'https://volkszaehler.io/middleware.php/';
+// var middleware = 'http://localhost/vz/htdocs/middleware.php/';
 
 var defaults = {
+	context: 'data',
 	queryOptions: {
 		from: 'today',
 		to: 'now'
+	},
+	queryYearToDate: {
+		from: 'first day of january this year',
+		to: 'now',
+		group: 'day'
 	},
 	value: "consumption",
 	divider: 1e3,
@@ -16,6 +23,7 @@ var defaults = {
 };
 
 var channels = {
+	// simple channels
 	temp: {
 		uuid: "outsidetemp",
 		title: "Außentemperatur",
@@ -35,32 +43,55 @@ var channels = {
 		uuid: "erzeugung",
 		title: "PV Erzeugung",
 	},
-	autarkie: {
-		uuid: "gesamt",
-		callback: autarkie,
-		display: false
+	// complex channels
+	prognoseBezug: {
+		uuid: "bezug",
+		context: "prognosis",
+		queryOptions: {
+			period: 'year',
+			group: 'day'
+		},
+		callback: prognose,
+	},
+	prognoseErzeugung: {
+		uuid: "erzeugung",
+		context: "prognosis",
+		queryOptions: {
+			period: 'year',
+			group: 'day'
+		},
+		callback: prognose,
 	},
 	jahresverbrauch: {
 		uuid: "bezug",
 		title: "Strombezug",
-		verb: "dieses Jahr ist",
-		queryOptions: {
-			from: 'first day of january this year',
-			to: 'now',
-			group: 'day'
-		},
-		precision: 0
+		// verb: "dieses Jahr ist",
+		verb: "", 
+		queryOptions: defaults.queryYearToDate,
+		precision: 0,
+		forecast: "prognoseBezug",
+		callback: withForecast
+	},
+	jahreserzeugung: {
+		uuid: "erzeugung",
+		title: "Jahreserzeugung",
+		verb: "", // "dieses Jahr ist",
+		queryOptions: defaults.queryYearToDate,
+		precision: 0,
+		forecast: "prognoseErzeugung",
+		callback: withForecast
+	},
+	autarkie: {
+		uuid: "gesamt",
+		verb: "heute",
+		callback: autarkie,
 	},
 	gasverbrauch: {
 		// uuid: "virtualconsumption",
 		uuid: "2a6e7fc0-c3aa-11e6-bd21-6392a0e6741f",
 		title: "Gasverbrauch",
 		verb: "dieses Jahr ist",
-		queryOptions: {
-			from: 'first day of january this year',
-			to: 'now',
-			group: 'day'
-		},
+		queryOptions: defaults.queryYearToDate,
 		precision: 0
 	}
 };
@@ -97,22 +128,24 @@ function httpGet(url) {
 function fetchData(channel) {
 	var options = channel.queryOptions || defaults.queryOptions;
 	var queryString = Object.keys(options).map(function(key) {
-		return key + "=" + options[key];
+		return key + "=" + encodeURIComponent(options[key]);
 	}).join("&");
 
-	var uri = middleware + channel.uuid + '.json?' + queryString;
+	var context = channel.context || defaults.context;
+	var uri = middleware + context + "/" + channel.uuid + '.json?' + queryString;
+
 	return httpGet(uri).then(function(res) {
 		channel.json = JSON.parse(res);
 		return channel;
 	});
 }
 
-function transform(channel) {
+function transform(channel, index, array, plain) {
 	var json = channel.json;
 	// console.log("<" + channel.uuid + ">: " + JSON.stringify(json));
 
 	// special case
-	if (channel.callback) {
+	if (channel.callback && plain !== true) {
 		return channel.callback(channel);
 	}
 
@@ -132,22 +165,48 @@ function transform(channel) {
 
 	var output = [
 		channel.title,
-		channel.verb || defaults.verb,
+		valueOrDefault(channel, "verb"),
 		value,
-		channel.unit || defaults.unit
-	].join(" ").replace("  ", " ") + ".";
+		valueOrDefault(channel, "unit"),
+	].join(" ") + ".";
 
 	console.log(output);
 	return output;
 }
 
 function autarkie(channel) {
-	var quota = 100 * (1 - channels.bezug.json.data.consumption / + channels.autarkie.json.data.consumption);
+	var quota = 100 * (1 - channels.bezug.json.data.consumption / + channel.json.data.consumption);
 	quota = +quota.toFixed(0);
 	
-	var output = `Autarkiequote ${quota}%.`;
+	var output = `Autarkiequote ${channel.verb} ${quota}%.`;
 	console.log(output);
 	return output;
+}
+
+function prognose(channel) {
+	var trend, factor = 100 * (channel.json.prognosis.factor - 1);
+	if (factor < 0) {
+		trend = "unter";
+		factor = -factor;
+	}
+	else if (factor >= 0) {
+		trend = "über";
+	}
+
+	factor = +factor.toFixed(0);
+	
+	channel.result = `Das ist ${factor}% ${trend} Vorjahr.`;
+	console.log(channel.result);
+
+	// no output
+	return '';
+}
+
+function withForecast(channel) {
+	// prevent endless recursion
+	var output = transform(channel, null, null, true);
+	var forecast = channels[channel.forecast];
+	return output + " " + forecast.result;
 }
 
 exports.handler = (event, context, callback) => {
@@ -157,17 +216,18 @@ exports.handler = (event, context, callback) => {
 		return fetchData(channel);
 	});
 
-	Promise.all(promises).then(function(channels) {
-		// console.log(channels);
-		var res = channels.map(transform);
+	Promise.all(promises).then(function() {
+		var res = Object.keys(channels).map(function(channelKey) {
+			return channels[channelKey];
+		}).map(transform);
 
 		var content = {
 		  "uid": "urn:uuid:1335c695-cfb8-4ebb-abbd-80da344effoo",
 		  "updateDate": new Date().toISOString(),
 		  "titleText": "Volkszaehler Briefing",
-		  "mainText": res.join(" "),
+		  "mainText": res.join(" ").replace(/ +/g, " "),
 		};
-		console.log(content);
+		// console.log(content);
 
 		var response = {
 			statusCode: 200,
@@ -185,4 +245,4 @@ exports.handler = (event, context, callback) => {
 	});
 };
 
-exports.handler(null,null,console.log);
+exports.handler(null,null,function(e,r){console.log(r)});
