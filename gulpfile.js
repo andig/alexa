@@ -1,8 +1,8 @@
 var gulp = require("gulp");
 
 const
-	buildfile = "volkszaehler.zip",
-	bucket = "volkszaehler";
+	buildfile = "dist/volkszaehler-interactive.zip",
+	bucket = "volkszaehler-interactive";
 
 gulp.task('default', ['build', 'deploy']);
 
