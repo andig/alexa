@@ -21,7 +21,7 @@ resource "aws_lambda_function" "default" {
 }
 
 resource "aws_iam_role" "default" {
-  name = "terraform_lambda_alexa_example"
+  name = "${var.lambda_name}"
 
   assume_role_policy = <<EOF
 {
@@ -46,7 +46,7 @@ EOF
 # resource can be [destructive](https://www.terraform.io/docs/providers/aws/r/iam_policy_attachment.html)
 # so it was avoided for the purporse of this example.
 resource "aws_iam_role_policy" "default" {
-  name = "terraform_lambda_alexa_example"
+  name = "${var.lambda_name}"
   role = "${aws_iam_role.default.id}"
 
   policy = <<EOF
@@ -60,9 +60,36 @@ resource "aws_iam_role_policy" "default" {
                 "logs:CreateLogStream",
                 "logs:PutLogEvents"
             ],
-            "Resource": "*"
+            "Resource": "arn:aws:logs:*:*:*"
         }
     ]
 }
 EOF
+}
+
+resource "aws_cloudwatch_metric_alarm" "default" {
+  alarm_name = "${var.lambda_name}-error"
+  comparison_operator = "GreaterThanThreshold"
+  period = "300"
+  evaluation_periods = "1"
+  metric_name = "Errors"
+  namespace = "AWS/Lambda"
+  statistic = "Average"
+  threshold = "0"
+  alarm_description = "${var.lambda_name} lambda health alarm"
+  alarm_actions = [
+    "${aws_sns_topic.default.arn}"
+  ],
+  dimensions {
+    FunctionName = "${aws_lambda_function.default.function_name}"
+  }
+}
+
+resource "aws_sns_topic" "default" {
+  name = "${var.lambda_name}-error"
+  count = "${var.sns_receiver_email != "" ? 1 : 0}"
+
+  provisioner "local-exec" {
+    command = "aws sns subscribe --topic-arn ${self.arn} --protocol email --notification-endpoint ${var.sns_receiver_email}"
+  }
 }

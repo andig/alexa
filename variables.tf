@@ -22,3 +22,8 @@ variable "lambda_runtime" {
   description = "Lambda function runtime environment"
   default = "nodejs8.10"
 }
+
+variable "sns_receiver_email" {
+  description = "Lambda error monitoring email address"
+  default = ""
+}
