@@ -23,6 +23,11 @@ variable "lambda_runtime" {
   default = "nodejs8.10"
 }
 
+variable "lambda_warming_schedule" {
+  description = "Lambda function cron timer"
+  default = "rate(5 minutes)"
+}
+
 variable "sns_receiver_email" {
   description = "Lambda error monitoring email address"
   default = ""

@@ -1,14 +1,5 @@
-# Specify the provider and access details
 provider "aws" {
   region = "${var.aws_region}"
-}
-
-# This resource is the core take away of this example.
-resource "aws_lambda_permission" "default" {
-  statement_id  = "AllowExecutionFromAlexa"
-  action        = "lambda:InvokeFunction"
-  function_name = "${aws_lambda_function.default.function_name}"
-  principal     = "alexa-appkit.amazon.com"
 }
 
 resource "aws_lambda_function" "default" {
@@ -18,6 +9,14 @@ resource "aws_lambda_function" "default" {
   role             = "${aws_iam_role.default.arn}"
   handler          = "${var.lambda_handler}"
   runtime          = "${var.lambda_runtime}"
+  timeout          = "30"
+}
+
+resource "aws_lambda_permission" "default" {
+  statement_id  = "AllowExecutionFromAlexa"
+  action        = "lambda:InvokeFunction"
+  function_name = "${aws_lambda_function.default.function_name}"
+  principal     = "alexa-appkit.amazon.com"
 }
 
 resource "aws_iam_role" "default" {
@@ -67,6 +66,10 @@ resource "aws_iam_role_policy" "default" {
 EOF
 }
 
+#
+# Monitoring/Alerting
+#
+
 resource "aws_cloudwatch_metric_alarm" "default" {
   alarm_name = "${var.lambda_name}-error"
   comparison_operator = "GreaterThanThreshold"
@@ -92,4 +95,29 @@ resource "aws_sns_topic" "default" {
   provisioner "local-exec" {
     command = "aws sns subscribe --topic-arn ${self.arn} --protocol email --notification-endpoint ${var.sns_receiver_email}"
   }
+}
+
+#
+# Lambda warming
+#
+
+resource "aws_cloudwatch_event_rule" "check_lambda" {
+    name = "every-five-minutes"
+    count = "${var.lambda_warming_schedule != "" ? 1 : 0}"
+    description = "Fires every five minutes"
+    schedule_expression = "${var.lambda_warming_schedule}"
+}
+
+resource "aws_cloudwatch_event_target" "check_lambda" {
+    rule = "${aws_cloudwatch_event_rule.check_lambda.name}"
+    target_id = "default"
+    arn = "${aws_lambda_function.default.arn}"
+}
+
+resource "aws_lambda_permission" "allow_cloudwatch_to_call_lambda" {
+    statement_id = "AllowExecutionFromCloudWatch"
+    action = "lambda:InvokeFunction"
+    function_name = "${aws_lambda_function.default.function_name}"
+    principal = "events.amazonaws.com"
+    source_arn = "${aws_cloudwatch_event_rule.check_lambda.arn}"
 }
